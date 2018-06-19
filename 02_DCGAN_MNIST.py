@@ -44,7 +44,6 @@ def generator(z, isTrain=True, reuse=False):
         return tf.nn.tanh(conv5)
 
 
-
 def discriminator(x, isTrain=True, reuse=False):
     # x : [None, 64, 64, 1]
     with tf.variable_scope(name_or_scope='Dis', reuse=reuse):
