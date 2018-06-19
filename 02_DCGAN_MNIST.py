@@ -87,7 +87,6 @@ with g.as_default():
     result_of_fake = discriminator(fake_x, isTrain=isTrain)
     result_of_real = discriminator(X, isTrain=isTrain, reuse=True)
 
-    epsilon = 1e-12
     d_loss_real = tf.reduce_mean(tf.nn.sigmoid_cross_entropy_with_logits(logits=result_of_real, labels=tf.ones([batch_size, 1, 1, 1])))
     d_loss_fake = tf.reduce_mean(tf.nn.sigmoid_cross_entropy_with_logits(logits=result_of_fake, labels=tf.zeros([batch_size, 1, 1, 1])))
     d_loss = d_loss_real + d_loss_fake
