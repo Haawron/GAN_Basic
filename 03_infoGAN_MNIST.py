@@ -164,21 +164,24 @@ with g.as_default():
 
     saver = tf.train.Saver(max_to_keep=1)
 
-    summary_g = tf.summary.merge(
-        [tf.summary.scalar('g_loss', g_loss), tf.summary.scalar('d_loss_fake', d_loss_fake)])
-    summary_d = tf.summary.merge(
-        [tf.summary.scalar('d_loss', d_loss), tf.summary.scalar('d_loss_real', d_loss_real)])
-    summary_q = tf.summary.merge(
-        [tf.summary.scalar('q_loss', q_loss),
-         tf.summary.scalar('q_loss_disc', q_loss_disc),
-         tf.summary.scalar('q_loss_cont', q_loss_cont)])
+    with tf.name_scope('Generator'):
+        summary_g = tf.summary.merge(
+            [tf.summary.scalar('g_loss', g_loss), tf.summary.scalar('d_loss_fake', d_loss_fake)])
+    with tf.name_scope('Discriminator'):
+        summary_d = tf.summary.merge(
+            [tf.summary.scalar('d_loss', d_loss), tf.summary.scalar('d_loss_real', d_loss_real)])
+    with tf.name_scope('Auxiliary Distribution'):
+        summary_q = tf.summary.merge(
+            [tf.summary.scalar('q_loss', q_loss),
+             tf.summary.scalar('q_loss_disc', q_loss_disc),
+             tf.summary.scalar('q_loss_cont', q_loss_cont)])
     writer = tf.summary.FileWriter(summary_path)
 
 with tf.Session(graph=g) as sess:
 
     sess.run(tf.global_variables_initializer())
     total_batches = len(train_x) // batch_size
-    plt.set_cmap('inferno')  # gray가 제일 점잖음. 강렬한 거 좋아하면 inferno도 괜찮음. 근데 RdGy_r이 젤 괜찮네!
+    plt.set_cmap('inferno')  # 추천 : gray, inferno, RdGy_r
 
     sample_noise = random_noise(50)
     # 0, 1, 2, 3, 4 one-hot vector 각각 열 개씩
