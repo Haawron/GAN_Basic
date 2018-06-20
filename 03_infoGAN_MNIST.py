@@ -2,26 +2,58 @@ import tensorflow as tf
 import numpy as np
 import matplotlib.pyplot as plt
 import time
+import os
+from functools import partial
 
 
 from tensorflow.examples.tutorials.mnist import input_data
 mnist = input_data.read_data_sets('MNIST_data/', reshape=False, validation_size=0)
 train_x = mnist.train.images
 
-batch_size = 100
+batch_size = 256
 learning_rate = 2e-4
-training_epoch = 20
+training_epoch = 30
 beta1 = .5
+
+dir_name = 'infoGAN'
+save_path = dir_name + '/Checkpoints/'
+summary_path = dir_name + '/Summaries'
+image_path = dir_name + '/Images/'
+
+if not os.path.exists(dir_name):
+    os.makedirs(dir_name)
+
+if not os.path.exists(save_path):
+    os.makedirs(save_path)
+else:
+    for f in os.listdir(save_path):
+        os.remove(save_path + f)
+
+if not os.path.exists(summary_path):
+    os.makedirs(summary_path)
+else:
+    for f in os.listdir(summary_path):
+        os.remove(summary_path + '/' + f)
+
+if not os.path.exists(image_path):
+    os.makedirs(image_path)
+else:
+    for f in os.listdir(image_path):
+        os.remove(image_path + f)
 
 
 def discriminator(x, isTrain=True, reuse=False, with_Q=False):
 
+    lrelu = partial(tf.nn.leaky_relu, alpha=.1)
+    BN = partial(tf.layers.batch_normalization, training=isTrain, momentum=.9)
+    BN_lrelu = lambda x: lrelu(BN(x))
+
     with tf.variable_scope(name_or_scope='Dis', reuse=reuse):
-        conv1 = tf.layers.conv2d(x, 64, 4, (2, 2), 'same', activation=tf.nn.leaky_relu)
-        conv2 = tf.layers.conv2d(conv1, 128, 4, (2, 2), 'same', activation=tf.nn.leaky_relu, use_bias=False)
-        conv2 = tf.layers.batch_normalization(conv2, training=isTrain)
-        dense1 = tf.layers.dense(conv2, 1024, tf.nn.leaky_relu, False)
-        dense1 = tf.layers.batch_normalization(dense1, training=isTrain)
+
+        conv1 = tf.layers.conv2d(x, 64, 4, (2, 2), 'same', activation=lrelu, use_bias=True)
+        conv2 = tf.layers.conv2d(conv1, 128, 4, (2, 2), 'same', activation=BN_lrelu, use_bias=False)
+        flat1 = tf.layers.flatten(conv2)
+        dense1 = tf.layers.dense(flat1, 1024, BN_lrelu, False)
         D = tf.layers.dense(dense1, 1)  # logit
 
         if not with_Q:
@@ -29,27 +61,29 @@ def discriminator(x, isTrain=True, reuse=False, with_Q=False):
 
         else:
             with tf.variable_scope(name_or_scope='Con', reuse=reuse):
-                dense2 = tf.layers.dense(dense1, 128, None, False)
-                dense2 = tf.layers.batch_normalization(dense2, training=isTrain)
-                dense2 = tf.nn.leaky_relu(dense2)
+
+                dense2 = tf.layers.dense(dense1, 128, BN_lrelu, False)
                 Q = tf.layers.dense(dense2, 12)  # logit
+
             return D, Q
 
 
 def generator(z, c, isTrain=True, reuse=False):
 
-    with tf.variable_scope(name_or_scope='Gen', reuse=reuse):
-        noise = tf.concat([z, c], 0)
-        dense1 = tf.layers.dense(noise, 1024, tf.nn.relu, False)
-        dense1 = tf.layers.batch_normalization(dense1, training=isTrain)
-        dense2 = tf.layers.dense(dense1, 7 * 7 * 128, tf.nn.relu, False)
-        dense2 = tf.layers.batch_normalization(dense2, training=isTrain)
-        dense2 = tf.reshape(dense2, [None, 7, 7, 128])
-        conv1 = tf.layers.conv2d_transpose(dense2, 64, 4, (2, 2), 'same', activation=tf.nn.relu, use_bias=False)
-        conv1 = tf.layers.batch_normalization(conv1, training=isTrain)
-        conv2 = tf.layers.conv2d_transpose(conv1, 1, 4, (2, 2), 'same')  # 논문엔 따로 얘기 없지만 stride 2여야 됨
+    BN = partial(tf.layers.batch_normalization, training=isTrain, momentum=.9)
+    BN_relu = lambda x: tf.nn.relu(BN(x))
 
-        return tf.nn.sigmoid(conv2)
+    with tf.variable_scope(name_or_scope='Gen', reuse=reuse):
+
+        noise = tf.concat([z, c], 1)
+
+        dense1 = tf.layers.dense(noise, 1024, BN_relu, False)
+        dense2 = tf.layers.dense(dense1, 7 * 7 * 128, BN_relu, False)
+        patch = tf.reshape(dense2, [-1, 7, 7, 128])  # None 하면 에러남
+        conv1 = tf.layers.conv2d_transpose(patch, 64, 4, (2, 2), 'same', activation=BN_relu, use_bias=False)
+        conv2 = tf.layers.conv2d_transpose(conv1, 1, 4, (2, 2), 'same', activation=tf.nn.sigmoid, use_bias=True)  # 논문엔 따로 얘기 없지만 stride 2여야 됨
+
+        return conv2
 
 
 def random_noise(batch_size):
@@ -98,12 +132,13 @@ with g.as_default():
     )
     d_loss = d_loss_real + d_loss_fake
 
-    g_loss_base = tf.reduce_mean(
+    g_loss = tf.reduce_mean(
         tf.nn.sigmoid_cross_entropy_with_logits(
             logits=fake_logits,
-            labels=tf.ones([batch_size, 1])
+            labels=tf.ones_like(fake_logits)
         )
     )
+
     q_loss_disc = tf.reduce_mean(
         tf.nn.sigmoid_cross_entropy_with_logits(
             logits=Q_logits[:, :10],
@@ -111,11 +146,10 @@ with g.as_default():
         )
     )  # categorical은 확률 space이고 continuous는 아니기 때문에 continuous는 logit을 그대로 씀
     q_loss_cont = tf.reduce_mean(tf.reduce_sum(
-            tf.square(Q_logits[:, 10:] - C[:, 10:])
-        ), axis=1
+        tf.square(Q_logits[:, 10:] - C[:, 10:]),
+        axis=1)
     )
     q_loss = q_loss_disc + q_loss_cont
-    g_loss = g_loss_base + q_loss
 
     t_vars = tf.trainable_variables()
     g_vars = [var for var in t_vars if 'Gen' in var.name]
@@ -124,26 +158,27 @@ with g.as_default():
 
     optimizer = tf.train.AdamOptimizer(learning_rate, beta1=beta1)
 
-    d_opt = optimizer.minimize(d_loss, var_list=d_vars)
-    g_opt = optimizer.minimize(g_loss, var_list=g_vars)
-    q_opt = optimizer.minimize(q_loss, var_list=q_vars)
+    d_opt = tf.train.AdamOptimizer(learning_rate, beta1=beta1).minimize(d_loss, var_list=d_vars)
+    g_opt = tf.train.AdamOptimizer(learning_rate * 5, beta1=beta1).minimize(g_loss, var_list=g_vars)
+    q_opt = tf.train.AdamOptimizer(learning_rate * 5, beta1=beta1).minimize(q_loss, var_list=q_vars)
 
-    saver = tf.train.Saver(max_to_keep=10)
+    saver = tf.train.Saver(max_to_keep=3)
 
     summary_g = tf.summary.merge(
-        [tf.summary.scalar(tf.summary.scalar('g_loss', g_loss), 'd_loss_fake', d_loss_fake)])
+        [tf.summary.scalar('g_loss', g_loss), tf.summary.scalar('d_loss_fake', d_loss_fake)])
     summary_d = tf.summary.merge(
-        [tf.summary.scalar(tf.summary.scalar('d_loss', d_loss), 'd_loss_real', d_loss_real)])
+        [tf.summary.scalar('d_loss', d_loss), tf.summary.scalar('d_loss_real', d_loss_real)])
     summary_q = tf.summary.merge(
         [tf.summary.scalar('q_loss', q_loss),
          tf.summary.scalar('q_loss_disc', q_loss_disc),
          tf.summary.scalar('q_loss_cont', q_loss_cont)])
-    writer = tf.summary.FileWriter('infoGAN/Summaries')
+    writer = tf.summary.FileWriter(summary_path)
 
 with tf.Session(graph=g) as sess:
 
     sess.run(tf.global_variables_initializer())
     total_batches = len(train_x) // batch_size
+    plt.set_cmap('inferno')  # gray가 제일 점잖음. 강렬한 거 좋아하면 inferno도 괜찮음. 근데 RdGy_r이 젤 괜찮네!
 
     sample_noise = random_noise(50)
     # 0, 1, 2, 3, 4 one-hot vector 각각 열 개씩
@@ -174,11 +209,12 @@ with tf.Session(graph=g) as sess:
                 [g_loss, d_loss, q_loss],
                 feed_dict={X: batch_x, Z: noise, C: code, isTrain: False})
 
-            gs, ds, qs = sess.run([summary_g, summary_d, summary_q],
-                               feed_dict={X: batch_x, Z: noise, C: code, isTrain: False})
-            writer.add_summary(gs, global_step)
-            writer.add_summary(ds, global_step)
-            writer.add_summary(qs, global_step)
+            if global_step % 10 == 0:
+                gs, ds, qs = sess.run([summary_g, summary_d, summary_q],
+                                   feed_dict={X: batch_x, Z: noise, C: code, isTrain: False})
+                writer.add_summary(gs, global_step)
+                writer.add_summary(ds, global_step)
+                writer.add_summary(qs, global_step)
 
             print('epoch : {:02d}/{:02d}'.format(epoch + 1, training_epoch), end=' | ')
             print('batch : {:03d}/{:03d}'.format(batch + 1, total_batches), end=' | ')
@@ -195,15 +231,17 @@ with tf.Session(graph=g) as sess:
         print('Time Spent in This Epoch : {:.3f}'.format(epoch_time))
 
         generated = sess.run(fake_x, feed_dict={Z: sample_noise, C: sample_code, isTrain: False})
-        fig, ax = plt.subplots(5, 10, figsize=(5, 10))
+        generated = np.clip(generated, 0., .8)  # inferno 색이 너무 강렬해서 ㅎ
+        fig, ax = plt.subplots(5, 10, figsize=(10, 5))  # figsize : 가로, 세로 크기 (인치)
         for i in range(5):
             for j in range(10):
-                ax[i].set_axis_off()
-                ax[i].imshow(generated[i*10+j, :, :, 0])
-        plt.savefig('infoGAN/Images/{:3d}.png'.format(epoch+1), bbox_inches='tight')
+                ax[i, j].set_axis_off()
+                ax[i, j].imshow(generated[i*10+j, :, :, 0])
+        fig.suptitle('EPOCH : {:02d}'.format(epoch+1), verticalalignment='baseline', fontweight='bold')
+        plt.savefig(image_path + '{:02d}.png'.format(epoch+1), bbox_inches='tight')
         plt.close(fig)
 
-        saver.save(sess, 'infoGAN/Checkpoints/model', global_step=epoch)
+        saver.save(sess, save_path + 'model', global_step=epoch)
 
     global_time1 = time.time()
     global_time_spent = global_time1 - global_time0
