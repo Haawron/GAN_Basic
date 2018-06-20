@@ -162,7 +162,7 @@ with g.as_default():
     g_opt = tf.train.AdamOptimizer(learning_rate * 5, beta1=beta1).minimize(g_loss, var_list=g_vars)
     q_opt = tf.train.AdamOptimizer(learning_rate * 5, beta1=beta1).minimize(q_loss, var_list=q_vars)
 
-    saver = tf.train.Saver(max_to_keep=3)
+    saver = tf.train.Saver(max_to_keep=1)
 
     summary_g = tf.summary.merge(
         [tf.summary.scalar('g_loss', g_loss), tf.summary.scalar('d_loss_fake', d_loss_fake)])
