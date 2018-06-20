@@ -80,9 +80,9 @@ with g.as_default():
             labels=tf.ones([batch_size, 1])
         )
     )
-    information_regularizer = tf.reduce_mean(
+    q_loss_disc = tf.reduce_mean(
         tf.nn.sigmoid_cross_entropy_with_logits(
             logits=Q_logits,
-            labels=tf.zeros([batch_size, 1])
+            labels=tf.zeros([batch_size, 10])
         )
     ) +
