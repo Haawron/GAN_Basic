@@ -14,6 +14,8 @@ batch_size = 256
 learning_rate = 2e-4
 training_epoch = 30
 beta1 = .5
+Train_and_Save_mode = False  # False if test mode
+Write_Summary = False
 
 dir_name = 'infoGAN'
 save_path = dir_name + '/Checkpoints/'
@@ -25,19 +27,20 @@ if not os.path.exists(dir_name):
 
 if not os.path.exists(save_path):
     os.makedirs(save_path)
-else:
+elif Train_and_Save_mode:
     for f in os.listdir(save_path):
         os.remove(save_path + f)
 
-if not os.path.exists(summary_path):
-    os.makedirs(summary_path)
-else:
-    for f in os.listdir(summary_path):
-        os.remove(summary_path + '/' + f)
+if Write_Summary:
+    if not os.path.exists(summary_path):
+        os.makedirs(summary_path)
+    elif Train_and_Save_mode:
+        for f in os.listdir(summary_path):
+            os.remove(summary_path + '/' + f)
 
 if not os.path.exists(image_path):
     os.makedirs(image_path)
-else:
+elif Train_and_Save_mode:
     for f in os.listdir(image_path):
         os.remove(image_path + f)
 
@@ -46,10 +49,10 @@ def discriminator(x, isTrain=True, reuse=False, with_Q=False):
 
     lrelu = partial(tf.nn.leaky_relu, alpha=.1)
     BN = partial(tf.layers.batch_normalization, training=isTrain, momentum=.9)
-    BN_lrelu = lambda x: lrelu(BN(x))
+    BN_lrelu = lambda X: lrelu(BN(X))
 
     with tf.variable_scope(name_or_scope='Dis', reuse=reuse):
-
+        # 25,694,208
         conv1 = tf.layers.conv2d(x, 64, 4, (2, 2), 'same', activation=lrelu, use_bias=True)
         conv2 = tf.layers.conv2d(conv1, 128, 4, (2, 2), 'same', activation=BN_lrelu, use_bias=False)
         flat1 = tf.layers.flatten(conv2)
@@ -61,7 +64,7 @@ def discriminator(x, isTrain=True, reuse=False, with_Q=False):
 
         else:
             with tf.variable_scope(name_or_scope='Con', reuse=reuse):
-
+                # 132,608
                 dense2 = tf.layers.dense(dense1, 128, BN_lrelu, False)
                 Q = tf.layers.dense(dense2, 12)  # logit
 
@@ -69,7 +72,7 @@ def discriminator(x, isTrain=True, reuse=False, with_Q=False):
 
 
 def generator(z, c, isTrain=True, reuse=False):
-
+    # 6,499,344
     BN = partial(tf.layers.batch_normalization, training=isTrain, momentum=.9)
     BN_relu = lambda x: tf.nn.relu(BN(x))
 
@@ -179,74 +182,86 @@ with g.as_default():
 
 with tf.Session(graph=g) as sess:
 
-    sess.run(tf.global_variables_initializer())
-    total_batches = len(train_x) // batch_size
     plt.set_cmap('inferno')  # 추천 : gray, inferno, RdGy_r
 
-    sample_noise = random_noise(50)
-    # 0, 1, 2, 3, 4 one-hot vector 각각 열 개씩
-    sample_categorical = np.eye(10)[(np.ones(50, np.int32).reshape(-1, 5) * np.arange(5)).T.flatten()]
-    sample_continuous = random_continuous(50)
-    sample_code = np.concatenate([sample_categorical, sample_continuous], axis=1)
+    if Train_and_Save_mode:
 
-    global_step = 0
+        sess.run(tf.global_variables_initializer())
 
-    for epoch in range(training_epoch):
+        total_batches = len(train_x) // batch_size
 
-        epoch_time0 = time.time()
+        sample_noise = random_noise(50)
+        # 0, 1, 2, 3, 4 one-hot vector 각각 열 개씩
+        sample_categorical = np.eye(10)[(np.ones(50, np.int32).reshape(-1, 5) * np.arange(5)).T.flatten()]
+        sample_continuous = random_continuous(50)
+        sample_code = np.concatenate([sample_categorical, sample_continuous], axis=1)
 
-        for batch in range(total_batches):
+        global_step = 0
 
-            t0 = time.time()
+        for epoch in range(training_epoch):
 
-            noise = random_noise(batch_size)
-            code = random_code(batch_size)
-            batch_x = train_x[batch * batch_size:(batch + 1) * batch_size]
-            sess.run(d_opt, feed_dict={X: batch_x, Z: noise, C: code, isTrain: True})
-            sess.run(g_opt, feed_dict={Z: noise, C: code, isTrain: True})
-            sess.run(q_opt, feed_dict={X: batch_x, Z: noise, C: code, isTrain: True})
+            epoch_time0 = time.time()
 
-            t1 = time.time()
+            for batch in range(total_batches):
 
-            gl, dl, ql = sess.run(
-                [g_loss, d_loss, q_loss],
-                feed_dict={X: batch_x, Z: noise, C: code, isTrain: False})
+                t0 = time.time()
 
-            if global_step % 10 == 0:
-                gs, ds, qs = sess.run([summary_g, summary_d, summary_q],
-                                   feed_dict={X: batch_x, Z: noise, C: code, isTrain: False})
-                writer.add_summary(gs, global_step)
-                writer.add_summary(ds, global_step)
-                writer.add_summary(qs, global_step)
+                noise = random_noise(batch_size)
+                code = random_code(batch_size)
+                batch_x = train_x[batch * batch_size:(batch + 1) * batch_size]
+                sess.run(d_opt, feed_dict={X: batch_x, Z: noise, C: code, isTrain: True})
+                sess.run(g_opt, feed_dict={Z: noise, C: code, isTrain: True})
+                sess.run(q_opt, feed_dict={X: batch_x, Z: noise, C: code, isTrain: True})
 
-            print('epoch : {:02d}/{:02d}'.format(epoch + 1, training_epoch), end=' | ')
-            print('batch : {:03d}/{:03d}'.format(batch + 1, total_batches), end=' | ')
-            print('time spent : {:.3f} sec'.format(t1 - t0), end=' | ')
-            print('gl : {:.6f} | dl : {:.6f} | ql : {:.6f}'.format(gl, dl, ql))
+                t1 = time.time()
 
-            global_step += 1
+                gl, dl, ql = sess.run(
+                    [g_loss, d_loss, q_loss],
+                    feed_dict={X: batch_x, Z: noise, C: code, isTrain: False})
 
-        epoch_time1 = time.time()
-        epoch_time = epoch_time1 - epoch_time0
-        print('==================== EPOCH :', epoch + 1, ' has ended ====================')
-        print('Generator Loss : {:.6f}\nDiscriminator Loss : {:.6f}'.format(gl, dl))
-        print('Auxiliary Distribution Loss : {:.6f}'.format(ql))
-        print('Time Spent in This Epoch : {:.3f}'.format(epoch_time))
+                if Write_Summary and global_step % 10 == 0:
+                    gs, ds, qs = sess.run([summary_g, summary_d, summary_q],
+                                       feed_dict={X: batch_x, Z: noise, C: code, isTrain: False})
+                    writer.add_summary(gs, global_step)
+                    writer.add_summary(ds, global_step)
+                    writer.add_summary(qs, global_step)
 
-        generated = sess.run(fake_x, feed_dict={Z: sample_noise, C: sample_code, isTrain: False})
-        generated = np.clip(generated, 0., .8)  # inferno 색이 너무 강렬해서 ㅎ
-        fig, ax = plt.subplots(5, 10, figsize=(10, 5))  # figsize : 가로, 세로 크기 (인치)
-        for i in range(5):
-            for j in range(10):
-                ax[i, j].set_axis_off()
-                ax[i, j].imshow(generated[i*10+j, :, :, 0])
-        fig.suptitle('EPOCH : {:02d}'.format(epoch+1), verticalalignment='baseline', fontweight='bold')
-        plt.savefig(image_path + '{:02d}.png'.format(epoch+1), bbox_inches='tight')
-        plt.close(fig)
+                print('epoch : {:02d}/{:02d}'.format(epoch + 1, training_epoch), end=' | ')
+                print('batch : {:03d}/{:03d}'.format(batch + 1, total_batches), end=' | ')
+                print('time spent : {:.3f} sec'.format(t1 - t0), end=' | ')
+                print('gl : {:.6f} | dl : {:.6f} | ql : {:.6f}'.format(gl, dl, ql))
 
-        saver.save(sess, save_path + 'model', global_step=epoch)
+                global_step += 1
 
-    global_time1 = time.time()
-    global_time_spent = global_time1 - global_time0
-    print(('=' * 40 + '\n') * 3, 'Optimization Has Been Completed!!')
-    print('Total Time Spent : {:.3f}'.format(global_time_spent))
+            epoch_time1 = time.time()
+            epoch_time = epoch_time1 - epoch_time0
+            print('==================== EPOCH :', epoch + 1, ' has ended ====================')
+            print('Generator Loss : {:.6f}\nDiscriminator Loss : {:.6f}'.format(gl, dl))
+            print('Auxiliary Distribution Loss : {:.6f}'.format(ql))
+            print('Time Spent in This Epoch : {:.3f}'.format(epoch_time))
+
+            generated = sess.run(fake_x, feed_dict={Z: sample_noise, C: sample_code, isTrain: False})
+            generated = np.clip(generated, 0., .8)  # inferno 색이 너무 강렬해서 ㅎ
+            fig, ax = plt.subplots(5, 10, figsize=(10, 5))  # figsize : 가로, 세로 크기 (인치)
+            for i in range(5):
+                for j in range(10):
+                    ax[i, j].set_axis_off()
+                    ax[i, j].imshow(generated[i*10+j, :, :, 0])
+            fig.suptitle('EPOCH : {:02d}'.format(epoch+1), verticalalignment='baseline', fontweight='bold')
+            plt.savefig(image_path + '{:02d}.png'.format(epoch+1), bbox_inches='tight')
+            plt.close(fig)
+
+            saver.save(sess, save_path + 'model', global_step=epoch)
+
+        global_time1 = time.time()
+        global_time_spent = global_time1 - global_time0
+        print(('=' * 40 + '\n') * 3, 'Optimization Has Been Completed!!')
+        print('Total Time Spent : {:.3f}'.format(global_time_spent))
+
+    else:  # test mode
+        saver.restore(sess, save_path + '_saved')
+
+        sample_noise = random_noise(50)
+        sample_categorical = [1] + [0] * 9
+        sample_continuous = None
+        sample_code = np.concatenate([sample_categorical, sample_continuous], axis=1)
