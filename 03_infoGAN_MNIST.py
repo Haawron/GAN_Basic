@@ -145,7 +145,7 @@ with g.as_default():
     q_loss_disc = tf.reduce_mean(
         tf.nn.sigmoid_cross_entropy_with_logits(
             logits=Q_logits[:, :10],
-            labels=C[:, :10]
+            labels=C[:, :10]  # label인 확률이 자꾸 변해도 됨?
         )
     )  # categorical은 확률 space이고 continuous는 아니기 때문에 continuous는 logit을 그대로 씀
     q_loss_cont = tf.reduce_mean(tf.reduce_sum(
@@ -158,8 +158,6 @@ with g.as_default():
     g_vars = [var for var in t_vars if 'Gen' in var.name]
     d_vars = [var for var in t_vars if 'Dis' in var.name]
     q_vars = [var for var in t_vars if any(x in var.name for x in ['Gen', 'Dis', 'Con'])]
-
-    optimizer = tf.train.AdamOptimizer(learning_rate, beta1=beta1)
 
     d_opt = tf.train.AdamOptimizer(learning_rate, beta1=beta1).minimize(d_loss, var_list=d_vars)
     g_opt = tf.train.AdamOptimizer(learning_rate * 5, beta1=beta1).minimize(g_loss, var_list=g_vars)
