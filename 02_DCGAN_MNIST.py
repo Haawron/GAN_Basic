@@ -10,7 +10,7 @@ mnist = input_data.read_data_sets('MNIST_data/', reshape=False, validation_size=
 train_x = mnist.train.images
 
 kernel_initializer = None
-gen_activation = tf.nn.leaky_relu
+gen_activation = tf.nn.relu
 dis_activation = tf.nn.leaky_relu
 
 batch_size = 100
